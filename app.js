@@ -1,7 +1,11 @@
-const STORAGE_KEY = "physicsmusic-embeds";
+const WALL_API =
+  "https://crudcrud.com/api/b3a25c6b01154d49b2c9318765cceef9/embeds";
+const POLL_MS = 15000;
+const MAX_ITEMS = 80;
 
 const form = document.getElementById("add-form");
 const input = document.getElementById("spotify-url");
+const addButton = form.querySelector("button[type='submit']");
 const statusEl = document.getElementById("form-status");
 const grid = document.getElementById("grid");
 const emptyState = document.getElementById("empty-state");
@@ -17,19 +21,8 @@ const SUPPORTED = new Set([
   "show",
 ]);
 
-function loadItems() {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    const parsed = raw ? JSON.parse(raw) : [];
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    return [];
-  }
-}
-
-function saveItems(items) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(items));
-}
+let items = [];
+let pollTimer = null;
 
 function parseSpotifyLink(value) {
   const trimmed = value.trim();
@@ -67,20 +60,48 @@ function embedSrc(item) {
   return `https://open.spotify.com/embed/${item.type}/${item.id}?utm_source=generator&theme=0`;
 }
 
+function itemKey(item) {
+  return `${item.type}:${item.id}`;
+}
+
+function wallSignature(list) {
+  return list.map((item) => `${item._id}:${itemKey(item)}`).join("|");
+}
+
+function normalize(list) {
+  if (!Array.isArray(list)) return [];
+  return list
+    .filter(
+      (item) =>
+        item &&
+        SUPPORTED.has(item.type) &&
+        typeof item.id === "string" &&
+        /^[a-zA-Z0-9]+$/.test(item.id)
+    )
+    .sort((a, b) => String(b._id || "").localeCompare(String(a._id || "")));
+}
+
 function setStatus(message, ok = false) {
   statusEl.textContent = message;
   statusEl.classList.toggle("ok", ok);
 }
 
-function render(items) {
-  const count = items.length;
+function render(list) {
+  const count = list.length;
   countLabel.textContent = `${count} item${count === 1 ? "" : "s"}`;
   clearAll.hidden = count === 0;
   emptyState.hidden = count !== 0;
   grid.hidden = count === 0;
+
+  if (wallSignature(list) === wallSignature(items) && grid.childElementCount) {
+    items = list;
+    return;
+  }
+
+  items = list;
   grid.replaceChildren();
 
-  items.forEach((item, index) => {
+  list.forEach((item) => {
     const card = document.createElement("article");
     card.className = `card ${item.type}`;
 
@@ -97,18 +118,61 @@ function render(items) {
     remove.className = "remove";
     remove.setAttribute("aria-label", `Remove ${item.type}`);
     remove.textContent = "×";
-    remove.addEventListener("click", () => {
-      const next = loadItems().filter((_, i) => i !== index);
-      saveItems(next);
-      render(next);
-    });
+    remove.addEventListener("click", () => removeItem(item));
 
     card.append(iframe, remove);
     grid.append(card);
   });
 }
 
-form.addEventListener("submit", (event) => {
+async function fetchWall() {
+  const response = await fetch(WALL_API, { cache: "no-store" });
+  if (!response.ok) {
+    throw new Error(`Could not load the wall (${response.status}).`);
+  }
+  return normalize(await response.json());
+}
+
+async function refreshWall({ quiet = false } = {}) {
+  try {
+    const next = await fetchWall();
+    render(next);
+    if (!quiet) setStatus("");
+    return next;
+  } catch (error) {
+    if (!quiet) setStatus(error.message || "Could not load the shared wall.");
+    return items;
+  }
+}
+
+async function addItem(parsed) {
+  const response = await fetch(WALL_API, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ type: parsed.type, id: parsed.id }),
+  });
+  if (!response.ok) {
+    throw new Error(`Could not add that link (${response.status}).`);
+  }
+}
+
+async function removeItem(item) {
+  if (!item._id) return;
+  try {
+    const response = await fetch(`${WALL_API}/${item._id}`, {
+      method: "DELETE",
+    });
+    if (!response.ok) {
+      throw new Error(`Could not remove that item (${response.status}).`);
+    }
+    await refreshWall({ quiet: true });
+    setStatus("Removed for everyone.", true);
+  } catch (error) {
+    setStatus(error.message || "Could not remove that item.");
+  }
+}
+
+form.addEventListener("submit", async (event) => {
   event.preventDefault();
   const parsed = parseSpotifyLink(input.value);
 
@@ -119,27 +183,61 @@ form.addEventListener("submit", (event) => {
     return;
   }
 
-  const items = loadItems();
-  const already = items.some(
-    (item) => item.type === parsed.type && item.id === parsed.id
-  );
-  if (already) {
-    setStatus("That one is already on the wall.");
-    return;
+  addButton.disabled = true;
+  try {
+    const current = await fetchWall();
+    if (current.some((item) => itemKey(item) === itemKey(parsed))) {
+      render(current);
+      setStatus("That one is already on the wall.");
+      return;
+    }
+    if (current.length >= MAX_ITEMS) {
+      render(current);
+      setStatus(`The wall is full (${MAX_ITEMS} items). Remove one first.`);
+      return;
+    }
+
+    await addItem(parsed);
+    input.value = "";
+    await refreshWall({ quiet: true });
+    setStatus("Added for everyone.", true);
+  } catch (error) {
+    setStatus(error.message || "Could not add that link.");
+  } finally {
+    addButton.disabled = false;
   }
-
-  items.unshift(parsed);
-  saveItems(items);
-  render(items);
-  input.value = "";
-  setStatus("Added.", true);
 });
 
-clearAll.addEventListener("click", () => {
-  if (!window.confirm("Remove every embed from this browser?")) return;
-  saveItems([]);
-  render([]);
-  setStatus("");
+clearAll.addEventListener("click", async () => {
+  if (!window.confirm("Remove every embed for everyone on this wall?")) return;
+  clearAll.disabled = true;
+  try {
+    const current = await fetchWall();
+    await Promise.all(
+      current.map((item) =>
+        fetch(`${WALL_API}/${item._id}`, { method: "DELETE" })
+      )
+    );
+    await refreshWall({ quiet: true });
+    setStatus("Cleared for everyone.", true);
+  } catch (error) {
+    setStatus(error.message || "Could not clear the wall.");
+  } finally {
+    clearAll.disabled = false;
+  }
 });
 
-render(loadItems());
+function startPolling() {
+  window.clearInterval(pollTimer);
+  pollTimer = window.setInterval(() => {
+    if (document.hidden) return;
+    refreshWall({ quiet: true });
+  }, POLL_MS);
+}
+
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden) refreshWall({ quiet: true });
+});
+
+refreshWall();
+startPolling();

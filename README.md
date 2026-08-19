@@ -2,7 +2,7 @@
 
 A small GitHub Pages site: paste a Spotify song or playlist link, and it is added to a grid of Spotify players.
 
-Items are stored in this browser with `localStorage`, so each visitor keeps their own wall.
+Everyone who opens the page shares one wall. Adds and removals are stored in a small public JSON API, and the page refreshes every few seconds so new embeds show up for other visitors.
 
 ## Enable GitHub Pages
 

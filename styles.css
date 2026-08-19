@@ -53,6 +53,12 @@ body {
   z-index: 1;
 }
 
+.add-form button:disabled,
+.ghost:disabled {
+  opacity: 0.6;
+  cursor: wait;
+}
+
 .site-header {
   max-width: 920px;
   margin: 0 auto 28px;
