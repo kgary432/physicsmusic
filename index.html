@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Physics Music</title>
+    <meta
+      name="description"
+      content="Paste Spotify song or playlist links and collect them in a grid of players."
+    />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="noise" aria-hidden="true"></div>
+    <header class="site-header">
+      <p class="eyebrow">listening wall</p>
+      <h1>Physics Music</h1>
+      <p class="lede">
+        Paste a Spotify song or playlist link. It lands in the grid as an
+        embedded player.
+      </p>
+    </header>
+
+    <form id="add-form" class="add-form" autocomplete="off">
+      <label class="sr-only" for="spotify-url">Spotify link</label>
+      <input
+        id="spotify-url"
+        name="url"
+        type="url"
+        inputmode="url"
+        placeholder="https://open.spotify.com/track/… or /playlist/…"
+        required
+      />
+      <button type="submit">Add</button>
+    </form>
+    <p id="form-status" class="form-status" role="status" aria-live="polite"></p>
+
+    <div class="toolbar">
+      <p id="count-label" class="count">0 items</p>
+      <button id="clear-all" type="button" class="ghost" hidden>
+        Clear all
+      </button>
+    </div>
+
+    <section id="empty-state" class="empty">
+      <p>Nothing on the wall yet.</p>
+      <p class="hint">
+        Open Spotify, copy a song or playlist link, and paste it above.
+      </p>
+    </section>
+
+    <main id="grid" class="grid" hidden></main>
+
+    <script src="app.js"></script>
+  </body>
+</html>
