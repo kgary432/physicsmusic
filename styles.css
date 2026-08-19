@@ -54,7 +54,7 @@ body {
 }
 
 .add-form button:disabled,
-.ghost:disabled {
+.remove:disabled {
   opacity: 0.6;
   cursor: wait;
 }
@@ -116,7 +116,6 @@ h1 {
 }
 
 .add-form button,
-.ghost,
 .remove {
   font-family: var(--mono);
   letter-spacing: 0.04em;
@@ -154,9 +153,6 @@ h1 {
 .toolbar {
   max-width: 920px;
   margin: 28px auto 16px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
 }
 
 .count {
@@ -166,20 +162,6 @@ h1 {
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--muted);
-}
-
-.ghost {
-  background: transparent;
-  color: var(--muted);
-  border: 1px solid var(--line);
-  border-radius: 999px;
-  padding: 7px 12px;
-  font-size: 12px;
-}
-
-.ghost:hover {
-  color: var(--ink);
-  border-color: #4a4a54;
 }
 
 .empty {
@@ -210,11 +192,13 @@ h1 {
 }
 
 .card {
-  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
   background: var(--bg-2);
   border: 1px solid var(--line);
   border-radius: 18px;
-  padding: 10px 10px 8px;
+  padding: 10px;
   min-height: 0;
 }
 
@@ -238,21 +222,17 @@ h1 {
 }
 
 .remove {
-  position: absolute;
-  top: 6px;
-  right: 8px;
-  z-index: 2;
-  width: 28px;
-  height: 28px;
-  border: 0;
-  border-radius: 999px;
-  background: rgba(16, 16, 20, 0.78);
-  color: var(--ink);
-  font-size: 16px;
-  line-height: 1;
+  align-self: stretch;
+  height: 36px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 12px;
 }
 
 .remove:hover {
+  border-color: var(--danger);
   background: var(--danger);
   color: #1a0b0a;
 }

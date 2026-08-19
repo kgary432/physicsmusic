@@ -10,7 +10,6 @@ const statusEl = document.getElementById("form-status");
 const grid = document.getElementById("grid");
 const emptyState = document.getElementById("empty-state");
 const countLabel = document.getElementById("count-label");
-const clearAll = document.getElementById("clear-all");
 
 const SUPPORTED = new Set([
   "track",
@@ -89,7 +88,6 @@ function setStatus(message, ok = false) {
 function render(list) {
   const count = list.length;
   countLabel.textContent = `${count} item${count === 1 ? "" : "s"}`;
-  clearAll.hidden = count === 0;
   emptyState.hidden = count !== 0;
   grid.hidden = count === 0;
 
@@ -116,9 +114,9 @@ function render(list) {
     const remove = document.createElement("button");
     remove.type = "button";
     remove.className = "remove";
-    remove.setAttribute("aria-label", `Remove ${item.type}`);
-    remove.textContent = "×";
-    remove.addEventListener("click", () => removeItem(item));
+    remove.setAttribute("aria-label", `Remove this ${item.type}`);
+    remove.textContent = "Remove";
+    remove.addEventListener("click", () => removeItem(item, remove));
 
     card.append(iframe, remove);
     grid.append(card);
@@ -156,8 +154,9 @@ async function addItem(parsed) {
   }
 }
 
-async function removeItem(item) {
+async function removeItem(item, button) {
   if (!item._id) return;
+  if (button) button.disabled = true;
   try {
     const response = await fetch(`${WALL_API}/${item._id}`, {
       method: "DELETE",
@@ -168,6 +167,7 @@ async function removeItem(item) {
     await refreshWall({ quiet: true });
     setStatus("Removed for everyone.", true);
   } catch (error) {
+    if (button) button.disabled = false;
     setStatus(error.message || "Could not remove that item.");
   }
 }
@@ -205,25 +205,6 @@ form.addEventListener("submit", async (event) => {
     setStatus(error.message || "Could not add that link.");
   } finally {
     addButton.disabled = false;
-  }
-});
-
-clearAll.addEventListener("click", async () => {
-  if (!window.confirm("Remove every embed for everyone on this wall?")) return;
-  clearAll.disabled = true;
-  try {
-    const current = await fetchWall();
-    await Promise.all(
-      current.map((item) =>
-        fetch(`${WALL_API}/${item._id}`, { method: "DELETE" })
-      )
-    );
-    await refreshWall({ quiet: true });
-    setStatus("Cleared for everyone.", true);
-  } catch (error) {
-    setStatus(error.message || "Could not clear the wall.");
-  } finally {
-    clearAll.disabled = false;
   }
 });
 
