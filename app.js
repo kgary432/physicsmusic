@@ -1,6 +1,6 @@
-const WALL_API =
-  "https://crudcrud.com/api/b3a25c6b01154d49b2c9318765cceef9/embeds";
-const POLL_MS = 15000;
+const GITHUB_REPO = "kgary432/physicsmusic";
+const WALL_API_URL = `https://api.github.com/repos/${GITHUB_REPO}/contents/wall.json`;
+const POLL_MS = 20000;
 const MAX_ITEMS = 80;
 
 const form = document.getElementById("add-form");
@@ -21,6 +21,7 @@ const SUPPORTED = new Set([
 ]);
 
 let items = [];
+let liveEndpoint = "";
 let pollTimer = null;
 
 function parseSpotifyLink(value) {
@@ -64,25 +65,43 @@ function itemKey(item) {
 }
 
 function wallSignature(list) {
-  return list.map((item) => `${item._id}:${itemKey(item)}`).join("|");
+  return list.map((item) => `${item._id || ""}:${itemKey(item)}`).join("|");
 }
 
 function normalize(list) {
   if (!Array.isArray(list)) return [];
-  return list
-    .filter(
-      (item) =>
-        item &&
-        SUPPORTED.has(item.type) &&
-        typeof item.id === "string" &&
-        /^[a-zA-Z0-9]+$/.test(item.id)
-    )
-    .sort((a, b) => String(b._id || "").localeCompare(String(a._id || "")));
+  const seen = new Set();
+  const out = [];
+  for (const item of list) {
+    if (
+      !item ||
+      !SUPPORTED.has(item.type) ||
+      typeof item.id !== "string" ||
+      !/^[a-zA-Z0-9]+$/.test(item.id)
+    ) {
+      continue;
+    }
+    const key = itemKey(item);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(item);
+  }
+  return out.sort((a, b) =>
+    String(b._id || itemKey(b)).localeCompare(String(a._id || itemKey(a)))
+  );
 }
 
 function setStatus(message, ok = false) {
   statusEl.textContent = message;
   statusEl.classList.toggle("ok", ok);
+}
+
+function issueUrl(kind, parsed) {
+  const title = `${kind}:${parsed.type}:${parsed.id}`;
+  const body = `https://open.spotify.com/${parsed.type}/${parsed.id}`;
+  return `https://github.com/${GITHUB_REPO}/issues/new?title=${encodeURIComponent(
+    title
+  )}&body=${encodeURIComponent(body)}`;
 }
 
 function render(list) {
@@ -123,12 +142,47 @@ function render(list) {
   });
 }
 
-async function fetchWall() {
-  const response = await fetch(WALL_API, { cache: "no-store" });
+async function fetchGitHubWall() {
+  const request = await fetch(`${WALL_API_URL}?ref=main&_=${Date.now()}`, {
+    cache: "no-store",
+  });
+  if (request.ok) {
+    const payload = await request.json();
+    const decoded = JSON.parse(
+      atob(String(payload.content || "").replace(/\n/g, ""))
+    );
+    if (decoded && typeof decoded === "object") return decoded;
+  }
+
+  const local = await fetch(`wall.json?_=${Date.now()}`, { cache: "no-store" });
+  if (!local.ok) {
+    throw new Error("Could not load the wall.");
+  }
+  return local.json();
+}
+
+async function fetchLiveWall(endpoint) {
+  const response = await fetch(endpoint, { cache: "no-store" });
   if (!response.ok) {
     throw new Error(`Could not load the wall (${response.status}).`);
   }
   return normalize(await response.json());
+}
+
+async function fetchWall() {
+  const meta = await fetchGitHubWall();
+  if (typeof meta.endpoint === "string" && meta.endpoint) {
+    liveEndpoint = meta.endpoint;
+  }
+  const saved = normalize(meta.items);
+
+  if (!liveEndpoint) return saved;
+
+  try {
+    return await fetchLiveWall(liveEndpoint);
+  } catch {
+    return saved;
+  }
 }
 
 async function refreshWall({ quiet = false } = {}) {
@@ -144,31 +198,41 @@ async function refreshWall({ quiet = false } = {}) {
 }
 
 async function addItem(parsed) {
-  const response = await fetch(WALL_API, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ type: parsed.type, id: parsed.id }),
-  });
-  if (!response.ok) {
-    throw new Error(`Could not add that link (${response.status}).`);
+  if (liveEndpoint) {
+    const response = await fetch(liveEndpoint, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ type: parsed.type, id: parsed.id }),
+    });
+    if (response.ok) return "live";
   }
+
+  window.open(issueUrl("embed", parsed), "_blank", "noopener,noreferrer");
+  return "issue";
 }
 
 async function removeItem(item, button) {
-  if (!item._id) return;
   if (button) button.disabled = true;
   try {
-    const response = await fetch(`${WALL_API}/${item._id}`, {
-      method: "DELETE",
-    });
-    if (!response.ok) {
-      throw new Error(`Could not remove that item (${response.status}).`);
+    if (liveEndpoint && item._id) {
+      const response = await fetch(`${liveEndpoint}/${item._id}`, {
+        method: "DELETE",
+      });
+      if (response.ok) {
+        await refreshWall({ quiet: true });
+        setStatus("Removed for everyone.", true);
+        return;
+      }
     }
-    await refreshWall({ quiet: true });
-    setStatus("Removed for everyone.", true);
+
+    window.open(issueUrl("remove", item), "_blank", "noopener,noreferrer");
+    setStatus(
+      "A GitHub tab opened. Submit that issue to remove this for everyone."
+    );
   } catch (error) {
-    if (button) button.disabled = false;
     setStatus(error.message || "Could not remove that item.");
+  } finally {
+    if (button) button.disabled = false;
   }
 }
 
@@ -197,10 +261,16 @@ form.addEventListener("submit", async (event) => {
       return;
     }
 
-    await addItem(parsed);
+    const result = await addItem(parsed);
     input.value = "";
-    await refreshWall({ quiet: true });
-    setStatus("Added for everyone.", true);
+    if (result === "live") {
+      await refreshWall({ quiet: true });
+      setStatus("Added for everyone.", true);
+    } else {
+      setStatus(
+        "A GitHub tab opened. Submit the issue, then this page will pick it up."
+      );
+    }
   } catch (error) {
     setStatus(error.message || "Could not add that link.");
   } finally {
