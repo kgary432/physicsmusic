@@ -24,8 +24,8 @@ const SUPPORTED = new Set([
 let items = [];
 let pollTimer = null;
 
-function githubToken() {
-  return String(window.PHYSICS_MUSIC_GITHUB_TOKEN || "").trim();
+function workerUrl() {
+  return String(window.PHYSICS_MUSIC_WORKER_URL || "").replace(/\/$/, "");
 }
 
 function parseSpotifyLink(value) {
@@ -113,8 +113,6 @@ async function githubFetch(path, options = {}) {
     "X-GitHub-Api-Version": "2022-11-28",
     ...(options.headers || {}),
   };
-  const token = githubToken();
-  if (token) headers.Authorization = `Bearer ${token}`;
 
   return fetch(`https://api.github.com/repos/${GITHUB_REPO}${path}`, {
     cache: "no-store",
@@ -199,12 +197,13 @@ async function refreshWall({ quiet = false } = {}) {
 async function addItem(parsed) {
   const title = embedTitle(parsed);
   const body = `https://open.spotify.com/${parsed.type}/${parsed.id}`;
+  const backend = workerUrl();
 
-  if (githubToken()) {
-    const response = await githubFetch("/issues", {
+  if (backend) {
+    const response = await fetch(`${backend}/add`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ title, body }),
+      body: JSON.stringify({ type: parsed.type, id: parsed.id }),
     });
     if (response.ok) return "api";
   }
@@ -216,11 +215,12 @@ async function addItem(parsed) {
 async function removeItem(item, button) {
   if (button) button.disabled = true;
   try {
-    if (githubToken() && item.issueNumber) {
-      const response = await githubFetch(`/issues/${item.issueNumber}`, {
-        method: "PATCH",
+    const backend = workerUrl();
+    if (backend && item.issueNumber) {
+      const response = await fetch(`${backend}/remove`, {
+        method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ state: "closed" }),
+        body: JSON.stringify({ issueNumber: item.issueNumber }),
       });
       if (response.ok) {
         await refreshWall({ quiet: true });

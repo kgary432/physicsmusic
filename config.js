@@ -1,3 +1,3 @@
-// Paste a fine-grained GitHub token here so Add/Remove work from the page.
-// Permission needed: Issues Read and write, this repo only.
-window.PHYSICS_MUSIC_GITHUB_TOKEN = "";
+// Public worker URL after you deploy worker/ with Wrangler.
+// Example: "https://physicsmusic-wall.yourname.workers.dev"
+window.PHYSICS_MUSIC_WORKER_URL = "";

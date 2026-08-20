@@ -1,0 +1,6 @@
+name = "physicsmusic-wall"
+main = "src/index.js"
+compatibility_date = "2026-08-20"
+
+[vars]
+GITHUB_REPO = "kgary432/physicsmusic"
