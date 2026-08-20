@@ -1,11 +1,9 @@
 name: Update shared wall
 
 on:
-  schedule:
-    - cron: "*/20 * * * *"
   workflow_dispatch:
   issues:
-    types: [opened]
+    types: [opened, closed]
 
 permissions:
   contents: write
@@ -19,7 +17,7 @@ jobs:
       - name: Sync wall.json
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          MODE: ${{ github.event_name == 'issues' && 'issue' || 'backup' }}
+          ISSUE_ACTION: ${{ github.event.action }}
           ISSUE_TITLE: ${{ github.event.issue.title }}
           ISSUE_NUMBER: ${{ github.event.issue.number }}
         run: python3 .github/scripts/update_wall.py

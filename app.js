@@ -1,7 +1,8 @@
 const GITHUB_REPO = "kgary432/physicsmusic";
-const WALL_API_URL = `https://api.github.com/repos/${GITHUB_REPO}/contents/wall.json`;
 const POLL_MS = 20000;
 const MAX_ITEMS = 80;
+const TITLE_RE =
+  /^embed:(track|playlist|album|artist|episode|show):([a-zA-Z0-9]+)$/;
 
 const form = document.getElementById("add-form");
 const input = document.getElementById("spotify-url");
@@ -21,8 +22,11 @@ const SUPPORTED = new Set([
 ]);
 
 let items = [];
-let liveEndpoint = "";
 let pollTimer = null;
+
+function githubToken() {
+  return String(window.PHYSICS_MUSIC_GITHUB_TOKEN || "").trim();
+}
 
 function parseSpotifyLink(value) {
   const trimmed = value.trim();
@@ -64,8 +68,12 @@ function itemKey(item) {
   return `${item.type}:${item.id}`;
 }
 
+function embedTitle(item) {
+  return `embed:${item.type}:${item.id}`;
+}
+
 function wallSignature(list) {
-  return list.map((item) => `${item._id || ""}:${itemKey(item)}`).join("|");
+  return list.map((item) => `${item.issueNumber || ""}:${itemKey(item)}`).join("|");
 }
 
 function normalize(list) {
@@ -86,9 +94,7 @@ function normalize(list) {
     seen.add(key);
     out.push(item);
   }
-  return out.sort((a, b) =>
-    String(b._id || itemKey(b)).localeCompare(String(a._id || itemKey(a)))
-  );
+  return out.sort((a, b) => (b.issueNumber || 0) - (a.issueNumber || 0));
 }
 
 function setStatus(message, ok = false) {
@@ -96,12 +102,25 @@ function setStatus(message, ok = false) {
   statusEl.classList.toggle("ok", ok);
 }
 
-function issueUrl(kind, parsed) {
-  const title = `${kind}:${parsed.type}:${parsed.id}`;
-  const body = `https://open.spotify.com/${parsed.type}/${parsed.id}`;
+function issueFormUrl(title, body) {
   return `https://github.com/${GITHUB_REPO}/issues/new?title=${encodeURIComponent(
     title
   )}&body=${encodeURIComponent(body)}`;
+}
+
+async function githubFetch(path, options = {}) {
+  const headers = {
+    "X-GitHub-Api-Version": "2022-11-28",
+    ...(options.headers || {}),
+  };
+  const token = githubToken();
+  if (token) headers.Authorization = `Bearer ${token}`;
+
+  return fetch(`https://api.github.com/repos/${GITHUB_REPO}${path}`, {
+    cache: "no-store",
+    ...options,
+    headers,
+  });
 }
 
 function render(list) {
@@ -142,47 +161,27 @@ function render(list) {
   });
 }
 
-async function fetchGitHubWall() {
-  const request = await fetch(`${WALL_API_URL}?ref=main&_=${Date.now()}`, {
-    cache: "no-store",
-  });
-  if (request.ok) {
-    const payload = await request.json();
-    const decoded = JSON.parse(
-      atob(String(payload.content || "").replace(/\n/g, ""))
-    );
-    if (decoded && typeof decoded === "object") return decoded;
-  }
-
-  const local = await fetch(`wall.json?_=${Date.now()}`, { cache: "no-store" });
-  if (!local.ok) {
-    throw new Error("Could not load the wall.");
-  }
-  return local.json();
-}
-
-async function fetchLiveWall(endpoint) {
-  const response = await fetch(endpoint, { cache: "no-store" });
+async function fetchWall() {
+  const response = await githubFetch("/issues?state=open&per_page=100");
   if (!response.ok) {
     throw new Error(`Could not load the wall (${response.status}).`);
   }
-  return normalize(await response.json());
-}
 
-async function fetchWall() {
-  const meta = await fetchGitHubWall();
-  if (typeof meta.endpoint === "string" && meta.endpoint) {
-    liveEndpoint = meta.endpoint;
+  const issues = await response.json();
+  if (!Array.isArray(issues)) return [];
+
+  const list = [];
+  for (const issue of issues) {
+    if (!issue || issue.pull_request) continue;
+    const match = String(issue.title || "").match(TITLE_RE);
+    if (!match) continue;
+    list.push({
+      type: match[1],
+      id: match[2],
+      issueNumber: issue.number,
+    });
   }
-  const saved = normalize(meta.items);
-
-  if (!liveEndpoint) return saved;
-
-  try {
-    return await fetchLiveWall(liveEndpoint);
-  } catch {
-    return saved;
-  }
+  return normalize(list);
 }
 
 async function refreshWall({ quiet = false } = {}) {
@@ -198,25 +197,30 @@ async function refreshWall({ quiet = false } = {}) {
 }
 
 async function addItem(parsed) {
-  if (liveEndpoint) {
-    const response = await fetch(liveEndpoint, {
+  const title = embedTitle(parsed);
+  const body = `https://open.spotify.com/${parsed.type}/${parsed.id}`;
+
+  if (githubToken()) {
+    const response = await githubFetch("/issues", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ type: parsed.type, id: parsed.id }),
+      body: JSON.stringify({ title, body }),
     });
-    if (response.ok) return "live";
+    if (response.ok) return "api";
   }
 
-  window.open(issueUrl("embed", parsed), "_blank", "noopener,noreferrer");
-  return "issue";
+  window.open(issueFormUrl(title, body), "_blank", "noopener,noreferrer");
+  return "form";
 }
 
 async function removeItem(item, button) {
   if (button) button.disabled = true;
   try {
-    if (liveEndpoint && item._id) {
-      const response = await fetch(`${liveEndpoint}/${item._id}`, {
-        method: "DELETE",
+    if (githubToken() && item.issueNumber) {
+      const response = await githubFetch(`/issues/${item.issueNumber}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ state: "closed" }),
       });
       if (response.ok) {
         await refreshWall({ quiet: true });
@@ -225,10 +229,17 @@ async function removeItem(item, button) {
       }
     }
 
-    window.open(issueUrl("remove", item), "_blank", "noopener,noreferrer");
-    setStatus(
-      "A GitHub tab opened. Submit that issue to remove this for everyone."
-    );
+    if (item.issueNumber) {
+      window.open(
+        `https://github.com/${GITHUB_REPO}/issues/${item.issueNumber}`,
+        "_blank",
+        "noopener,noreferrer"
+      );
+      setStatus("A GitHub tab opened. Close that issue to remove this for everyone.");
+      return;
+    }
+
+    setStatus("Could not remove that item.");
   } catch (error) {
     setStatus(error.message || "Could not remove that item.");
   } finally {
@@ -263,12 +274,12 @@ form.addEventListener("submit", async (event) => {
 
     const result = await addItem(parsed);
     input.value = "";
-    if (result === "live") {
+    if (result === "api") {
       await refreshWall({ quiet: true });
       setStatus("Added for everyone.", true);
     } else {
       setStatus(
-        "A GitHub tab opened. Submit the issue, then this page will pick it up."
+        "A GitHub tab opened. Submit the issue (sign in if asked), then refresh this page."
       );
     }
   } catch (error) {
